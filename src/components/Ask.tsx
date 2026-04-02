@@ -57,6 +57,9 @@ const Ask: React.FC<AskProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [deepResearch, setDeepResearch] = useState(false);
 
+  // Multi-turn: list of completed Q&A pairs shown above the current streaming response
+  const [chatPairs, setChatPairs] = useState<Array<{ question: string; answer: string }>>([]);
+
   // Session state
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessionSlug, setSessionSlug] = useState<string | null>(null);
@@ -161,6 +164,7 @@ const Ask: React.FC<AskProps> = ({
     setResearchComplete(false);
     setResearchStages([]);
     setCurrentStageIndex(0);
+    setChatPairs([]);
     setSessionId(null);
     setSessionSlug(null);
     setShareCopied(false);
@@ -589,18 +593,21 @@ const Ask: React.FC<AskProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    if (!question.trim() || isLoading) return;
-
     handleConfirmAsk();
   };
 
   // Handle confirm and send request
   const handleConfirmAsk = async () => {
+    if (!question.trim() || isLoading) return;
+
+    const currentQuestion = question;
+    setQuestion('');
     setIsLoading(true);
     setResponse('');
     setResearchIteration(0);
     setResearchComplete(false);
+    setResearchStages([]);
+    setCurrentStageIndex(0);
 
     try {
       const currentModel = isCustomSelectedModel ? customSelectedModel : selectedModel;
@@ -608,17 +615,20 @@ const Ask: React.FC<AskProps> = ({
       // Create a session on first question (new conversation)
       let sid = sessionId;
       if (!sid) {
-        sid = await createSession(question, selectedProvider, currentModel);
+        sid = await createSession(currentQuestion, selectedProvider, currentModel);
       }
 
-      // Create initial message
-      const initialMessage: Message = {
+      // Build full history from previous Q&A pairs + this new question
+      const historyMessages: Message[] = [];
+      for (const pair of chatPairs) {
+        historyMessages.push({ role: 'user', content: pair.question });
+        historyMessages.push({ role: 'assistant', content: pair.answer });
+      }
+      const userMessage: Message = {
         role: 'user',
-        content: deepResearch ? `[DEEP RESEARCH] ${question}` : question
+        content: deepResearch ? `[DEEP RESEARCH] ${currentQuestion}` : currentQuestion
       };
-
-      // Set initial conversation history
-      const newHistory: Message[] = [initialMessage];
+      const newHistory: Message[] = [...historyMessages, userMessage];
       setConversationHistory(newHistory);
 
       // Prepare request body
@@ -631,62 +641,49 @@ const Ask: React.FC<AskProps> = ({
         language: language
       };
 
-      // Add tokens if available
       if (repoInfo?.token) {
         requestBody.token = repoInfo.token;
       }
 
-      // Close any existing WebSocket connection
       closeWebSocket(webSocketRef.current);
 
       let fullResponse = '';
 
-      // Create a new WebSocket connection
       webSocketRef.current = createChatWebSocket(
         requestBody,
-        // Message handler
         (message: string) => {
           fullResponse += message;
           setResponse(fullResponse);
 
-          // Extract research stage if this is a deep research response
           if (deepResearch) {
-            const stage = extractResearchStage(fullResponse, 1); // First iteration
+            const stage = extractResearchStage(fullResponse, 1);
             if (stage) {
-              // Add the stage to the research stages
               setResearchStages([stage]);
               setCurrentStageIndex(0);
             }
           }
         },
-        // Error handler
         (error: Event) => {
           console.error('WebSocket error:', error);
           setResponse(prev => prev + '\n\nError: WebSocket connection failed. Falling back to HTTP...');
-
-          // Fallback to HTTP if WebSocket fails
           fallbackToHttp(requestBody);
         },
-        // Close handler
         () => {
-          // Save messages to session
+          // Move completed pair into chatPairs, clear streaming response
+          setChatPairs(prev => [...prev, { question: currentQuestion, answer: fullResponse }]);
+          setResponse('');
+
+          // Save all messages to session
           if (sid) {
-            const finalHistory: Message[] = [
-              ...newHistory,
-              { role: 'assistant', content: fullResponse }
-            ];
-            saveSessionMessages(sid, finalHistory);
+            const allMessages: Message[] = [...newHistory, { role: 'assistant', content: fullResponse }];
+            saveSessionMessages(sid, allMessages);
           }
 
-          // If deep research is enabled, check if we should continue
           if (deepResearch) {
             const isComplete = checkIfResearchComplete(fullResponse);
             setResearchComplete(isComplete);
-
-            // If not complete, start the research process
             if (!isComplete) {
               setResearchIteration(1);
-              // The continueResearch function will be triggered by the useEffect
             }
           }
 
@@ -806,18 +803,40 @@ const Ask: React.FC<AskProps> = ({
           </div>
         </form>
 
-        {/* Response area */}
-        {response && (
+        {/* Response area: past Q&A pairs + current streaming response */}
+        {(chatPairs.length > 0 || response) && (
           <div className="border-t border-gray-200 dark:border-gray-700 mt-4">
             <div
               ref={responseRef}
-              className="p-4 max-h-[500px] overflow-y-auto"
+              className="p-4 max-h-[500px] overflow-y-auto space-y-6"
             >
-              <Markdown content={response} />
+              {/* Past completed Q&A pairs */}
+              {chatPairs.map((pair, i) => (
+                <div key={i}>
+                  <div className="text-xs font-semibold uppercase tracking-wider text-purple-600 mb-1">You</div>
+                  <div className="text-sm text-[var(--foreground)]/80 bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800/30 rounded-md px-3 py-2 mb-3">
+                    {pair.question}
+                  </div>
+                  <div className="text-xs font-semibold uppercase tracking-wider text-[var(--foreground)]/40 mb-1">DeepWiki</div>
+                  <Markdown content={pair.answer} />
+                  {i < chatPairs.length - 1 && (
+                    <div className="border-b border-gray-200 dark:border-gray-700 mt-4" />
+                  )}
+                </div>
+              ))}
+
+              {/* Currently streaming response */}
+              {response && (
+                <div>
+                  {chatPairs.length > 0 && <div className="border-b border-gray-200 dark:border-gray-700 mb-4" />}
+                  <div className="text-xs font-semibold uppercase tracking-wider text-[var(--foreground)]/40 mb-1">DeepWiki</div>
+                  <Markdown content={response} />
+                </div>
+              )}
             </div>
 
             {/* Research navigation and clear button */}
-            <div className="p-2 flex justify-between items-center border-t border-gray-200 dark:border-gray-700">
+            <div className="p-2 flex justify-between items-center border-t border-gray-200 dark:border-gray-700 flex-wrap gap-2">
               {/* Research navigation */}
               {deepResearch && researchStages.length > 1 && (
                 <div className="flex items-center space-x-2">

@@ -371,6 +371,10 @@ def get_model_config(provider="google", model=None):
     if "providers" not in configs:
         raise ValueError("Provider configuration not loaded")
 
+    # Fall back to default_provider if provider is empty or not found
+    if not provider:
+        provider = configs.get("default_provider", "openrouter")
+
     provider_config = configs["providers"].get(provider)
     if not provider_config:
         raise ValueError(f"Configuration for provider '{provider}' not found")

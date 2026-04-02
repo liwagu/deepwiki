@@ -1,6 +1,6 @@
 'use client';
 
-import React, {useState, useRef, useEffect} from 'react';
+import React, {useState, useRef, useEffect, useCallback} from 'react';
 import {FaChevronLeft, FaChevronRight } from 'react-icons/fa';
 import Markdown from './Markdown';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -56,6 +56,11 @@ const Ask: React.FC<AskProps> = ({
   const [response, setResponse] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [deepResearch, setDeepResearch] = useState(false);
+
+  // Session state
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionSlug, setSessionSlug] = useState<string | null>(null);
+  const [shareCopied, setShareCopied] = useState(false);
 
   // Model selection state
   const [selectedProvider, setSelectedProvider] = useState(provider);
@@ -156,9 +161,62 @@ const Ask: React.FC<AskProps> = ({
     setResearchComplete(false);
     setResearchStages([]);
     setCurrentStageIndex(0);
+    setSessionId(null);
+    setSessionSlug(null);
+    setShareCopied(false);
     if (inputRef.current) {
       inputRef.current.focus();
     }
+  };
+
+  // Create a new session on the backend and return its id
+  const createSession = useCallback(async (firstQuestion: string, currentProvider: string, currentModel: string): Promise<string | null> => {
+    try {
+      const repoUrl = getRepoUrl(repoInfo);
+      const res = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question: firstQuestion,
+          repo_url: repoUrl,
+          owner: repoInfo.owner,
+          repo: repoInfo.repo,
+          provider: currentProvider,
+          model: currentModel,
+          language: language,
+          token: repoInfo.token || null,
+        }),
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      setSessionId(data.id);
+      setSessionSlug(data.slug);
+      return data.id;
+    } catch {
+      return null;
+    }
+  }, [repoInfo, language]);
+
+  // Persist conversation messages to backend session
+  const saveSessionMessages = useCallback(async (sid: string, messages: Message[]) => {
+    try {
+      await fetch(`/api/sessions/${sid}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages }),
+      });
+    } catch {
+      // Non-critical — ignore save failures
+    }
+  }, []);
+
+  const handleCopyShareLink = () => {
+    if (!sessionSlug) return;
+    const url = `${window.location.origin}/search/${sessionSlug}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2000);
+    });
   };
   const downloadresponse = () =>{
   const blob = new Blob([response], { type: 'text/markdown' });
@@ -545,6 +603,14 @@ const Ask: React.FC<AskProps> = ({
     setResearchComplete(false);
 
     try {
+      const currentModel = isCustomSelectedModel ? customSelectedModel : selectedModel;
+
+      // Create a session on first question (new conversation)
+      let sid = sessionId;
+      if (!sid) {
+        sid = await createSession(question, selectedProvider, currentModel);
+      }
+
       // Create initial message
       const initialMessage: Message = {
         role: 'user',
@@ -561,7 +627,7 @@ const Ask: React.FC<AskProps> = ({
         type: repoInfo.type,
         messages: newHistory.map(msg => ({ role: msg.role as 'user' | 'assistant', content: msg.content })),
         provider: selectedProvider,
-        model: isCustomSelectedModel ? customSelectedModel : selectedModel,
+        model: currentModel,
         language: language
       };
 
@@ -603,6 +669,15 @@ const Ask: React.FC<AskProps> = ({
         },
         // Close handler
         () => {
+          // Save messages to session
+          if (sid) {
+            const finalHistory: Message[] = [
+              ...newHistory,
+              { role: 'assistant', content: fullResponse }
+            ];
+            saveSessionMessages(sid, finalHistory);
+          }
+
           // If deep research is enabled, check if we should continue
           if (deepResearch) {
             const isComplete = checkIfResearchComplete(fullResponse);
@@ -775,6 +850,31 @@ const Ask: React.FC<AskProps> = ({
               )}
 
             <div className="flex items-center space-x-2">
+              {/* Share button — only shown once a session exists */}
+              {sessionSlug && (
+                <button
+                  onClick={handleCopyShareLink}
+                  className="text-xs text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 px-2 py-1 rounded-md hover:bg-gray-200 dark:hover:bg-gray-700 flex items-center gap-1"
+                  title="Copy shareable link"
+                >
+                  {shareCopied ? (
+                    <>
+                      <svg className="w-3 h-3 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                      <span className="text-green-500">Copied!</span>
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                      </svg>
+                      Share
+                    </>
+                  )}
+                </button>
+              )}
+
               {/* Download button */}
               <button
                 onClick={downloadresponse}

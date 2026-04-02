@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 
+export const dynamic = 'force-dynamic'; // Prevent static caching of the API response
+
 // The target backend server base URL, derived from environment variable or defaulted.
 const TARGET_SERVER_BASE_URL = process.env.SERVER_BASE_URL || 'http://localhost:8001';
 
@@ -27,11 +29,11 @@ export async function GET() {
     const modelConfig = await backendResponse.json();
     return NextResponse.json(modelConfig);
   } catch (error) {
-    console.error('Error fetching model configurations:', error);    
+    console.error('Error fetching model configurations:', error);
     return new NextResponse(JSON.stringify({ error: error }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 }
 

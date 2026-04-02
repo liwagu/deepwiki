@@ -1,9 +1,7 @@
-# syntax=docker/dockerfile:1-labs
-
 # Build argument for custom certificates directory
 ARG CUSTOM_CERT_DIR="certs"
 
-FROM node:20-alpine3.22 AS node_base
+FROM dockerproxy.net/library/node:20-alpine3.22 AS node_base
 
 FROM node_base AS node_deps
 WORKDIR /app
@@ -22,7 +20,7 @@ ENV NODE_OPTIONS="--max-old-space-size=4096"
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN NODE_ENV=production npm run build
 
-FROM python:3.11-slim AS py_deps
+FROM dockerproxy.net/library/python:3.11-slim-bookworm AS py_deps
 WORKDIR /api
 COPY api/pyproject.toml .
 COPY api/poetry.lock .
@@ -34,7 +32,7 @@ RUN python -m pip install poetry==2.0.1 --no-cache-dir && \
     poetry cache clear --all .
 
 # Use Python 3.11 as final image
-FROM python:3.11-slim
+FROM dockerproxy.net/library/python:3.11-slim-bookworm
 
 # Set working directory
 WORKDIR /app

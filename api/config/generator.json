@@ -1,5 +1,5 @@
 {
-  "default_provider": "google",
+  "default_provider": "openrouter",
   "providers": {
     "dashscope": {
       "default_model": "qwen-plus",
@@ -41,9 +41,13 @@
       }
     },
     "openai": {
-      "default_model": "gpt-5-nano",
+      "default_model": "claude-opus-4-6",
       "supportsCustomModel": true,
       "models": {
+        "claude-opus-4-6": {
+          "temperature": 0.7,
+          "top_p": 0.8
+        },
         "gpt-5": {
           "temperature": 1.0
         },
@@ -74,9 +78,13 @@
       }
     },
     "openrouter": {
-      "default_model": "openai/gpt-5-nano",
+      "default_model": "google/gemini-3.1-pro-preview",
       "supportsCustomModel": true,
       "models": {
+        "google/gemini-3.1-pro-preview": {
+          "temperature": 0.7,
+          "top_p": 0.8
+        },
         "openai/gpt-5-nano": {
           "temperature": 0.7,
           "top_p": 0.8
@@ -196,4 +204,3 @@
     }
   }
 }
-

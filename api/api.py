@@ -1,11 +1,16 @@
 import os
 import logging
+import sqlite3
+import uuid
+import re
+import time
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from typing import List, Optional, Dict, Any, Literal
 import json
 from datetime import datetime
+from pathlib import Path
 from pydantic import BaseModel, Field
 import google.generativeai as genai
 import asyncio
@@ -144,6 +149,82 @@ class ModelConfig(BaseModel):
 class AuthorizationConfig(BaseModel):
     code: str = Field(..., description="Authorization code")
 
+# --- Session Models ---
+class SessionMessage(BaseModel):
+    role: str
+    content: str
+    timestamp: Optional[int] = None
+
+class SessionCreate(BaseModel):
+    question: str
+    repo_url: str
+    owner: str
+    repo: str
+    provider: str
+    model: str
+    language: str = 'en'
+    token: Optional[str] = None
+
+class SessionMessagesUpdate(BaseModel):
+    messages: List[SessionMessage]
+
+# --- Session SQLite Storage ---
+def get_sessions_db_path() -> str:
+    db_dir = Path(os.path.expanduser("~")) / ".adalflow"
+    db_dir.mkdir(parents=True, exist_ok=True)
+    return str(db_dir / "sessions.db")
+
+def init_sessions_db():
+    conn = sqlite3.connect(get_sessions_db_path())
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS sessions (
+            id TEXT PRIMARY KEY,
+            slug TEXT NOT NULL UNIQUE,
+            question TEXT NOT NULL,
+            repo_url TEXT NOT NULL,
+            owner TEXT NOT NULL,
+            repo TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            model TEXT NOT NULL,
+            language TEXT DEFAULT 'en',
+            token TEXT,
+            messages TEXT DEFAULT '[]',
+            created_at INTEGER NOT NULL
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+def _make_slug(question: str, session_id: str) -> str:
+    """Create a URL slug like deepwiki.com: question-text_uuid"""
+    text = question.lower()
+    text = re.sub(r'[^a-z0-9\s]', '', text)
+    text = re.sub(r'\s+', '-', text.strip())
+    text = text[:50].rstrip('-')
+    # If text is too short (e.g. all Chinese chars stripped), use short UUID prefix
+    if len(text) < 3:
+        text = session_id[:8]
+    return f"{text}_{session_id}"
+
+def _row_to_session(row: sqlite3.Row) -> dict:
+    return {
+        "id": row["id"],
+        "slug": row["slug"],
+        "question": row["question"],
+        "repo_url": row["repo_url"],
+        "owner": row["owner"],
+        "repo": row["repo"],
+        "provider": row["provider"],
+        "model": row["model"],
+        "language": row["language"],
+        "token": row["token"],
+        "messages": json.loads(row["messages"] or "[]"),
+        "created_at": row["created_at"],
+    }
+
+# Initialize sessions DB on startup
+init_sessions_db()
+
 from api.config import configs, WIKI_AUTH_MODE, WIKI_AUTH_CODE
 
 @app.get("/lang/config")
@@ -163,6 +244,57 @@ async def validate_auth_code(request: AuthorizationConfig):
     Check authorization code.
     """
     return {"success": WIKI_AUTH_CODE == request.code}
+
+@app.post("/sessions")
+async def create_session(data: SessionCreate):
+    """Create a new chat session and return its ID and shareable slug."""
+    session_id = str(uuid.uuid4())
+    slug = _make_slug(data.question, session_id)
+    created_at = int(time.time() * 1000)
+    conn = sqlite3.connect(get_sessions_db_path())
+    conn.execute(
+        "INSERT INTO sessions (id, slug, question, repo_url, owner, repo, provider, model, language, token, messages, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (session_id, slug, data.question, data.repo_url, data.owner, data.repo, data.provider, data.model, data.language, data.token, "[]", created_at)
+    )
+    conn.commit()
+    conn.close()
+    return {"id": session_id, "slug": slug}
+
+@app.get("/sessions/by-slug/{slug:path}")
+async def get_session_by_slug(slug: str):
+    """Get a session by its slug."""
+    conn = sqlite3.connect(get_sessions_db_path())
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM sessions WHERE slug = ?", (slug,)).fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return _row_to_session(row)
+
+@app.get("/sessions/{session_id}")
+async def get_session(session_id: str):
+    """Get a session by ID."""
+    conn = sqlite3.connect(get_sessions_db_path())
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return _row_to_session(row)
+
+@app.patch("/sessions/{session_id}/messages")
+async def update_session_messages(session_id: str, data: SessionMessagesUpdate):
+    """Replace the messages array for a session."""
+    conn = sqlite3.connect(get_sessions_db_path())
+    row = conn.execute("SELECT id FROM sessions WHERE id = ?", (session_id,)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Session not found")
+    messages_json = json.dumps([m.dict() for m in data.messages])
+    conn.execute("UPDATE sessions SET messages = ? WHERE id = ?", (messages_json, session_id))
+    conn.commit()
+    conn.close()
+    return {"success": True}
 
 @app.get("/models/config", response_model=ModelConfig)
 async def get_model_config():

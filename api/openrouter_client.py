@@ -150,7 +150,7 @@ class OpenRouterClient(ModelClient):
                             f"{self.async_client['base_url']}/chat/completions",
                             headers=headers,
                             json=api_kwargs,
-                            timeout=60
+                            timeout=aiohttp.ClientTimeout(total=300)
                         ) as response:
                             if response.status != 200:
                                 error_text = await response.text()
@@ -339,12 +339,12 @@ class OpenRouterClient(ModelClient):
                 return request_error_generator()
 
             except Exception as e:
-                e_unexp = e
-                log.error(f"Unexpected error calling OpenRouter API asynchronously: {str(e_unexp)}")
+                log.error(f"Unexpected error calling OpenRouter API asynchronously: {str(e)}")
 
                 # Return a generator that yields the error message
+                e_msg = str(e)
                 async def unexpected_error_generator():
-                    yield f"Unexpected error calling OpenRouter API: {str(e_unexp)}"
+                    yield f"Unexpected error calling OpenRouter API: {e_msg}"
                 return unexpected_error_generator()
 
         else:

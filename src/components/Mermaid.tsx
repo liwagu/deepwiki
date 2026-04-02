@@ -307,8 +307,12 @@ const Mermaid: React.FC<MermaidProps> = ({ chart, className = '', zoomingEnabled
   const [svg, setSvg] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  // Track whether user has clicked into the diagram to activate pan-zoom
+  const [panZoomActive, setPanZoomActive] = useState(false);
   const mermaidRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const panZoomInstanceRef = useRef<any>(null);
   const idRef = useRef(`mermaid-${Math.random().toString(36).substring(2, 9)}`);
   const isDarkModeRef = useRef(
     typeof window !== 'undefined' &&
@@ -316,22 +320,35 @@ const Mermaid: React.FC<MermaidProps> = ({ chart, className = '', zoomingEnabled
     window.matchMedia('(prefers-color-scheme: dark)').matches
   );
 
-  // Initialize pan-zoom functionality when SVG is rendered
+  // Deactivate pan-zoom when clicking outside the diagram
   useEffect(() => {
-    if (svg && zoomingEnabled && containerRef.current) {
+    if (!panZoomActive) return;
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setPanZoomActive(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [panZoomActive]);
+
+  // Initialize pan-zoom only when user has clicked to activate
+  useEffect(() => {
+    if (svg && zoomingEnabled && panZoomActive && containerRef.current) {
       const initializePanZoom = async () => {
         const svgElement = containerRef.current?.querySelector("svg");
         if (svgElement) {
-          // Remove any max-width constraints
           svgElement.style.maxWidth = "none";
           svgElement.style.width = "100%";
           svgElement.style.height = "100%";
 
           try {
-            // Dynamically import svg-pan-zoom only when needed in the browser
             const svgPanZoom = (await import("svg-pan-zoom")).default;
-
-            svgPanZoom(svgElement, {
+            // Destroy previous instance first
+            if (panZoomInstanceRef.current) {
+              try { panZoomInstanceRef.current.destroy(); } catch { /* ignore */ }
+            }
+            panZoomInstanceRef.current = svgPanZoom(svgElement, {
               zoomEnabled: true,
               controlIconsEnabled: true,
               fit: true,
@@ -339,19 +356,20 @@ const Mermaid: React.FC<MermaidProps> = ({ chart, className = '', zoomingEnabled
               minZoom: 0.1,
               maxZoom: 10,
               zoomScaleSensitivity: 0.3,
+              preventMouseEventsDefault: true,
             });
           } catch (error) {
             console.error("Failed to load svg-pan-zoom:", error);
           }
         }
       };
-
-      // Wait for the SVG to be rendered
-      setTimeout(() => {
-        void initializePanZoom();
-      }, 100);
+      setTimeout(() => { void initializePanZoom(); }, 100);
+    } else if (!panZoomActive && panZoomInstanceRef.current) {
+      // Destroy instance when deactivated so scroll returns to page
+      try { panZoomInstanceRef.current.destroy(); } catch { /* ignore */ }
+      panZoomInstanceRef.current = null;
     }
-  }, [svg, zoomingEnabled]);
+  }, [svg, zoomingEnabled, panZoomActive]);
 
   useEffect(() => {
     if (!chart) return;
@@ -451,14 +469,40 @@ const Mermaid: React.FC<MermaidProps> = ({ chart, className = '', zoomingEnabled
         className={`w-full max-w-full ${zoomingEnabled ? "h-[600px] p-4" : ""}`}
       >
         <div
-          className={`relative group ${zoomingEnabled ? "h-full rounded-lg border-2 border-black" : ""}`}
+          className={`relative group ${zoomingEnabled ? "h-full rounded-lg border-2 ${panZoomActive ? 'border-purple-500' : 'border-gray-300 dark:border-gray-600'}" : ""}`}
         >
           <div
             className={`flex justify-center overflow-auto text-center my-2 cursor-pointer hover:shadow-md transition-shadow duration-200 rounded-md ${className} ${zoomingEnabled ? "h-full" : ""}`}
             dangerouslySetInnerHTML={{ __html: svg }}
-            onClick={zoomingEnabled ? undefined : handleDiagramClick}
-            title={zoomingEnabled ? undefined : "Click to view fullscreen"}
+            onClick={zoomingEnabled ? () => setPanZoomActive(true) : handleDiagramClick}
+            title={zoomingEnabled ? (panZoomActive ? "Click outside to exit pan/zoom" : "Click to enable pan & zoom") : "Click to view fullscreen"}
           />
+
+          {/* For zoomingEnabled: show overlay when NOT active */}
+          {zoomingEnabled && !panZoomActive && (
+            <div
+              className="absolute inset-0 flex items-end justify-center pb-4 cursor-pointer"
+              onClick={() => setPanZoomActive(true)}
+            >
+              <div className="bg-gray-800/70 text-white px-3 py-1.5 rounded-full text-xs flex items-center gap-1.5 shadow-lg">
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                  <line x1="11" y1="8" x2="11" y2="14"></line>
+                  <line x1="8" y1="11" x2="14" y2="11"></line>
+                </svg>
+                点击进入图表可缩放平移
+              </div>
+            </div>
+          )}
+
+          {/* For zoomingEnabled: show "active" badge when pan-zoom is on */}
+          {zoomingEnabled && panZoomActive && (
+            <div className="absolute top-2 right-2 bg-purple-600/80 text-white px-2 py-1 rounded text-xs flex items-center gap-1 shadow">
+              <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+              缩放模式 · 点击外部退出
+            </div>
+          )}
 
           {!zoomingEnabled && (
             <div className="absolute top-2 right-2 bg-gray-700/70 dark:bg-gray-900/70 text-white p-1.5 rounded-md opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center gap-1.5 text-xs shadow-md pointer-events-none">

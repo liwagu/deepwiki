@@ -245,6 +245,23 @@ async def validate_auth_code(request: AuthorizationConfig):
     """
     return {"success": WIKI_AUTH_CODE == request.code}
 
+@app.get("/sessions")
+async def list_sessions(owner: Optional[str] = None, repo: Optional[str] = None, limit: int = 50):
+    """List recent sessions, optionally filtered by owner/repo."""
+    conn = sqlite3.connect(get_sessions_db_path())
+    conn.row_factory = sqlite3.Row
+    if owner and repo:
+        rows = conn.execute(
+            "SELECT * FROM sessions WHERE owner=? AND repo=? ORDER BY created_at DESC LIMIT ?",
+            (owner, repo, limit)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM sessions ORDER BY created_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+    conn.close()
+    return [_row_to_session(r) for r in rows]
+
 @app.post("/sessions")
 async def create_session(data: SessionCreate):
     """Create a new chat session and return its ID and shareable slug."""

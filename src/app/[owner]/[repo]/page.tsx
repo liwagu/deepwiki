@@ -275,6 +275,13 @@ export default function RepoWikiPage() {
   const [isAskModalOpen, setIsAskModalOpen] = useState(false);
   const askComponentRef = useRef<{ clearConversation: () => void } | null>(null);
 
+  // Session history panel
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [sessionHistory, setSessionHistory] = useState<Array<{
+    id: string; slug: string; question: string; created_at: number; messages: Array<{role:string;content:string}>;
+  }>>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
   // Authentication state
   const [authRequired, setAuthRequired] = useState<boolean>(false);
   const [authCode, setAuthCode] = useState<string>('');
@@ -2204,15 +2211,91 @@ IMPORTANT:
         </div>
       </footer>
 
-      {/* Floating Chat Button */}
+      {/* Floating button group: Chat + History */}
       {!isLoading && wikiStructure && (
-        <button
-          onClick={() => setIsAskModalOpen(true)}
-          className="fixed bottom-6 right-6 w-14 h-14 rounded-full bg-[var(--accent-primary)] text-white shadow-lg flex items-center justify-center hover:bg-[var(--accent-primary)]/90 transition-all z-50"
-          aria-label={messages.ask?.title || 'Ask about this repository'}
-        >
-          <FaComments className="text-xl" />
-        </button>
+        <div className="fixed bottom-6 right-6 flex flex-col items-end gap-2 z-50">
+          {/* History button */}
+          <button
+            onClick={async () => {
+              if (!isHistoryOpen) {
+                setHistoryLoading(true);
+                try {
+                  const res = await fetch(`/api/sessions?owner=${effectiveRepoInfo.owner}&repo=${effectiveRepoInfo.repo}&limit=30`);
+                  const data = await res.json();
+                  setSessionHistory(Array.isArray(data) ? data : []);
+                } catch { setSessionHistory([]); }
+                finally { setHistoryLoading(false); }
+              }
+              setIsHistoryOpen(v => !v);
+            }}
+            className="w-10 h-10 rounded-full bg-[var(--card-bg)] border border-[var(--border-color)] text-[var(--foreground)]/70 shadow flex items-center justify-center hover:bg-[var(--accent-primary)]/10 transition-all"
+            title="历史对话"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </button>
+          {/* Chat button */}
+          <button
+            onClick={() => setIsAskModalOpen(true)}
+            className="w-14 h-14 rounded-full bg-[var(--accent-primary)] text-white shadow-lg flex items-center justify-center hover:bg-[var(--accent-primary)]/90 transition-all"
+            aria-label={messages.ask?.title || 'Ask about this repository'}
+          >
+            <FaComments className="text-xl" />
+          </button>
+        </div>
+      )}
+
+      {/* Session History Sidebar */}
+      <div className={`fixed top-0 right-0 h-full w-80 bg-[var(--card-bg)] border-l border-[var(--border-color)] shadow-2xl z-50 flex flex-col transition-transform duration-300 ${isHistoryOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+        <div className="flex items-center justify-between p-4 border-b border-[var(--border-color)]">
+          <h3 className="font-semibold text-sm text-[var(--foreground)]">历史对话</h3>
+          <button onClick={() => setIsHistoryOpen(false)} className="text-[var(--muted)] hover:text-[var(--foreground)] p-1 rounded">
+            <FaTimes />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-3 space-y-2">
+          {historyLoading && (
+            <div className="text-center py-8 text-[var(--muted)] text-sm">加载中...</div>
+          )}
+          {!historyLoading && sessionHistory.length === 0 && (
+            <div className="text-center py-8 text-[var(--muted)] text-sm">暂无历史对话</div>
+          )}
+          {!historyLoading && sessionHistory.map(s => (
+            <a
+              key={s.id}
+              href={`/search/${s.slug}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block p-3 rounded-lg border border-[var(--border-color)] hover:border-[var(--accent-primary)]/50 hover:bg-[var(--accent-primary)]/5 transition-colors group"
+            >
+              <div className="text-sm text-[var(--foreground)] font-medium line-clamp-2 group-hover:text-[var(--accent-primary)] transition-colors">
+                {s.question}
+              </div>
+              <div className="flex items-center justify-between mt-1.5">
+                <span className="text-xs text-[var(--muted)]">
+                  {new Date(s.created_at).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                </span>
+                <span className="text-xs text-[var(--muted)]">
+                  {s.messages.length > 0 ? `${Math.floor(s.messages.length / 2)} 轮对话` : '无记录'}
+                </span>
+              </div>
+            </a>
+          ))}
+        </div>
+        <div className="p-3 border-t border-[var(--border-color)]">
+          <button
+            onClick={() => { setIsHistoryOpen(false); setIsAskModalOpen(true); }}
+            className="w-full py-2 bg-[var(--accent-primary)] text-white rounded-lg text-sm font-medium hover:bg-[var(--accent-primary)]/90 transition-colors flex items-center justify-center gap-2"
+          >
+            <FaComments />
+            新建对话
+          </button>
+        </div>
+      </div>
+      {/* History backdrop */}
+      {isHistoryOpen && (
+        <div className="fixed inset-0 z-40 bg-black/20" onClick={() => setIsHistoryOpen(false)} />
       )}
 
       {/* Ask Modal - Always render but conditionally show/hide */}
@@ -2220,10 +2303,7 @@ IMPORTANT:
         <div className="bg-[var(--card-bg)] rounded-lg shadow-xl w-full max-w-3xl max-h-[80vh] flex flex-col">
           <div className="flex items-center justify-end p-3 absolute top-0 right-0 z-10">
             <button
-              onClick={() => {
-                // Just close the modal without clearing the conversation
-                setIsAskModalOpen(false);
-              }}
+              onClick={() => setIsAskModalOpen(false)}
               className="text-[var(--muted)] hover:text-[var(--foreground)] transition-colors bg-[var(--card-bg)]/80 rounded-full p-2"
               aria-label="Close"
             >

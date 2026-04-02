@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 export const dynamic = 'force-dynamic'; // Prevent static caching of the API response
 
 // The target backend server base URL, derived from environment variable or defaulted.
-const TARGET_SERVER_BASE_URL = process.env.SERVER_BASE_URL || 'http://localhost:8001';
+const TARGET_SERVER_BASE_URL = process.env.SERVER_BASE_URL || 'http://localhost:8003';
 
 export async function GET() {
   try {

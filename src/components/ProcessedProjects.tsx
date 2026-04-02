@@ -13,6 +13,10 @@ interface ProcessedProject {
   repo_type: string;
   submittedAt: number;
   language: string;
+  repo_url?: string;
+  provider?: string;
+  model?: string;
+  title?: string;
 }
 
 interface ProcessedProjectsProps {
@@ -205,12 +209,25 @@ export default function ProcessedProjects({
                   <FaTimes className="h-4 w-4" />
                 </button>
                 <Link
-                  href={`/${project.owner}/${project.repo}?type=${project.repo_type}&language=${project.language}`}
+                  href={(() => {
+                    const repoUrl = project.repo_url || `https://${project.repo_type}.com/${project.owner}/${project.repo}`;
+                    const params = new URLSearchParams({
+                      type: project.repo_type,
+                      repo_url: repoUrl,
+                      language: project.language,
+                      ...(project.provider ? { provider: project.provider } : {}),
+                      ...(project.model ? { model: project.model } : {}),
+                    });
+                    return `/${project.owner}/${project.repo}?${params}`;
+                  })()}
                   className="block"
                 >
-                  <h3 className="text-lg font-semibold text-[var(--link-color)] hover:underline mb-2 line-clamp-2">
-                    {project.name}
+                  <h3 className="text-lg font-semibold text-[var(--link-color)] hover:underline mb-1 line-clamp-2">
+                    {project.title || project.name}
                   </h3>
+                  {project.title && (
+                    <p className="text-xs text-[var(--muted)] mb-2">{project.name}</p>
+                  )}
                   <div className="flex flex-wrap gap-2 mb-3">
                     <span className="px-2 py-1 text-xs bg-[var(--accent-primary)]/10 text-[var(--accent-primary)] rounded-full border border-[var(--accent-primary)]/20">
                       {project.repo_type}
@@ -235,7 +252,17 @@ export default function ProcessedProjects({
                   <FaTimes className="h-4 w-4" />
                 </button>
                 <Link
-                  href={`/${project.owner}/${project.repo}?type=${project.repo_type}&language=${project.language}`}
+                  href={(() => {
+                    const repoUrl = project.repo_url || `https://${project.repo_type}.com/${project.owner}/${project.repo}`;
+                    const params = new URLSearchParams({
+                      type: project.repo_type,
+                      repo_url: repoUrl,
+                      language: project.language,
+                      ...(project.provider ? { provider: project.provider } : {}),
+                      ...(project.model ? { model: project.model } : {}),
+                    });
+                    return `/${project.owner}/${project.repo}?${params}`;
+                  })()}
                   className="flex items-center justify-between"
                 >
                   <div className="flex-1 min-w-0">

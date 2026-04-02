@@ -61,6 +61,10 @@ class ProcessedProjectEntry(BaseModel):
     repo_type: str # Renamed from type to repo_type for clarity with existing models
     submittedAt: int # Timestamp
     language: str # Extracted from filename
+    repo_url: Optional[str] = None  # From cache file
+    provider: Optional[str] = None  # From cache file
+    model: Optional[str] = None     # From cache file
+    title: Optional[str] = None     # Wiki title from cache
 
 class RepoInfo(BaseModel):
     owner: str
@@ -756,6 +760,24 @@ async def get_processed_projects():
                         language = parts[-1] # language is the last part
                         repo = "_".join(parts[2:-1]) # repo can contain underscores
 
+                        # Read extra metadata from cache file
+                        extra_repo_url = None
+                        extra_provider = None
+                        extra_model = None
+                        extra_title = None
+                        try:
+                            with open(file_path, 'r', encoding='utf-8') as cf:
+                                cache_data = json.load(cf)
+                                extra_repo_url = cache_data.get('repo_url') or (
+                                    cache_data.get('repo', {}) or {}
+                                ).get('repoUrl') or f"https://{repo_type}.com/{owner}/{repo}"
+                                extra_provider = cache_data.get('provider')
+                                extra_model = cache_data.get('model')
+                                ws = cache_data.get('wiki_structure', {})
+                                extra_title = ws.get('title') if isinstance(ws, dict) else None
+                        except Exception:
+                            pass
+
                         project_entries.append(
                             ProcessedProjectEntry(
                                 id=filename,
@@ -763,8 +785,12 @@ async def get_processed_projects():
                                 repo=repo,
                                 name=f"{owner}/{repo}",
                                 repo_type=repo_type,
-                                submittedAt=int(stats.st_mtime * 1000), # Convert to milliseconds
-                                language=language
+                                submittedAt=int(stats.st_mtime * 1000),
+                                language=language,
+                                repo_url=extra_repo_url,
+                                provider=extra_provider,
+                                model=extra_model,
+                                title=extra_title,
                             )
                         )
                     else:

@@ -67,3 +67,12 @@ next-env.d.ts
 
 # ignore adding self-signed certs
 certs/
+
+# Claude Code
+.claude/
+
+# Playwright MCP artifacts
+.playwright-mcp/
+
+# npm lock file (project uses yarn)
+package-lock.json
